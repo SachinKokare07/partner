@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Check Firebase Users</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 20px auto;
+      padding: 20px;
+      background: #0f172a;
+      color: #fff;
+    }
+    h1 { color: #60a5fa; }
+    .section {
+      background: #1e293b;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+      border: 1px solid #334155;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #334155;
+    }
+    th {
+      background: #334155;
+      color: #60a5fa;
+    }
+    button {
+      background: #ef4444;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button:hover {
+      background: #dc2626;
+    }
+    .info {
+      background: #1e3a8a;
+      padding: 10px;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+    .refresh-btn {
+      background: #10b981;
+      padding: 10px 20px;
+      font-size: 16px;
+    }
+    .refresh-btn:hover {
+      background: #059669;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    .verified { background: #10b981; color: white; }
+    .not-verified { background: #ef4444; color: white; }
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #60a5fa;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 Firebase Users Database Viewer</h1>
+  
+  <div class="info">
+    <strong>Instructions:</strong>
+    <ol>
+      <li>This page shows all users registered in your Firebase app</li>
+      <li>Click "Refresh" to reload the latest data</li>
+      <li>Click "Delete" to remove a user (will delete from both Auth and Firestore)</li>
+      <li>Open browser console (F12) to see more details</li>
+    </ol>
+  </div>
+
+  <button class="refresh-btn" onclick="loadUsers()">🔄 Refresh Data</button>
+
+  <div class="section">
+    <h2>📧 Authentication Users</h2>
+    <div id="auth-users" class="loading">Loading...</div>
+  </div>
+
+  <div class="section">
+    <h2>👥 Firestore User Profiles</h2>
+    <div id="firestore-users" class="loading">Loading...</div>
+  </div>
+
+  <div class="section">
+    <h2>🔑 OTP Codes</h2>
+    <div id="otp-codes" class="loading">Loading...</div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+    import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+    import { getFirestore, collection, getDocs, doc, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+
+    // Your Firebase config (copy from firebase/config.js)
+    const firebaseConfig = {
+      apiKey: "AIzaSyDnmbJMC79qQM2xlWqj_g4Uur96pZYRBKI",
+      authDomain: "partner-b4e79.firebaseapp.com",
+      projectId: "partner-b4e79",
+      storageBucket: "partner-b4e79.firebasestorage.app",
+      messagingSenderId: "151724836959",
+      appId: "1:151724836959:web:7d51293bc3c67b851ff3ea"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    window.loadUsers = async function() {
+      console.log('Loading users...');
+      
+      // Check auth state
+      onAuthStateChanged(auth, (user) => {
+        if (!user) {
+          document.getElementById('auth-users').innerHTML = 
+            '<p style="color: #ef4444;">⚠️ You need to be logged in to view users. Please login to your app first.</p>';
+        }
+      });
+
+      // Load Firestore users
+      try {
+        const usersSnapshot = await getDocs(collection(db, 'users'));
+        const users = [];
+        usersSnapshot.forEach((doc) => {
+          users.push({ id: doc.id, ...doc.data() });
+        });
+
+        console.log('Found users:', users);
+
+        if (users.length === 0) {
+          document.getElementById('firestore-users').innerHTML = 
+            '<p>No users found in database.</p>';
+        } else {
+          let html = '<table><thead><tr><th>Email</th><th>Name</th><th>Verified</th><th>Partner</th><th>DSA</th><th>Dev</th><th>Streak</th><th>Created</th><th>Action</th></tr></thead><tbody>';
+          
+          users.forEach(user => {
+            const verified = user.emailVerified ? 
+              '<span class="badge verified">✓ Verified</span>' : 
+              '<span class="badge not-verified">✗ Not Verified</span>';
+            
+            html += `
+              <tr>
+                <td><strong>${user.email || 'N/A'}</strong></td>
+                <td>${user.name || 'N/A'}</td>
+                <td>${verified}</td>
+                <td>${user.partner ? '✓ Has Partner' : '✗ No Partner'}</td>
+                <td>${user.dsa || 0}</td>
+                <td>${user.dev || 0}</td>
+                <td>${user.streak || 0}</td>
+                <td>${new Date(user.lastLoginDate).toLocaleDateString() || 'N/A'}</td>
+                <td><button onclick="deleteUser('${user.id}', '${user.email}')">Delete</button></td>
+              </tr>
+            `;
+          });
+          
+          html += '</tbody></table>';
+          document.getElementById('firestore-users').innerHTML = html;
+        }
+      } catch (error) {
+        console.error('Error loading users:', error);
+        document.getElementById('firestore-users').innerHTML = 
+          `<p style="color: #ef4444;">Error: ${error.message}</p>`;
+      }
+
+      // Load OTP codes
+      try {
+        const otpSnapshot = await getDocs(collection(db, 'otpCodes'));
+        const otps = [];
+        otpSnapshot.forEach((doc) => {
+          otps.push({ id: doc.id, ...doc.data() });
+        });
+
+        console.log('Found OTP codes:', otps);
+
+        if (otps.length === 0) {
+          document.getElementById('otp-codes').innerHTML = 
+            '<p>No OTP codes found.</p>';
+        } else {
+          let html = '<table><thead><tr><th>Email</th><th>OTP Code</th><th>Created</th><th>Expires</th><th>Verified</th><th>Action</th></tr></thead><tbody>';
+          
+          otps.forEach(otp => {
+            const now = new Date();
+            const expires = new Date(otp.expiresAt);
+            const isExpired = now > expires;
+            const status = otp.verified ? 
+              '<span class="badge verified">Used</span>' : 
+              isExpired ? 
+                '<span class="badge not-verified">Expired</span>' : 
+                '<span class="badge" style="background: #f59e0b;">Active</span>';
+            
+            html += `
+              <tr>
+                <td>${otp.email || 'N/A'}</td>
+                <td><strong>${otp.code}</strong></td>
+                <td>${new Date(otp.createdAt).toLocaleString()}</td>
+                <td>${expires.toLocaleString()}</td>
+                <td>${status}</td>
+                <td><button onclick="deleteOTP('${otp.id}')">Delete</button></td>
+              </tr>
+            `;
+          });
+          
+          html += '</tbody></table>';
+          document.getElementById('otp-codes').innerHTML = html;
+        }
+      } catch (error) {
+        console.error('Error loading OTP codes:', error);
+        document.getElementById('otp-codes').innerHTML = 
+          `<p style="color: #ef4444;">Error: ${error.message}</p>`;
+      }
+
+      // Note about Firebase Auth users
+      document.getElementById('auth-users').innerHTML = `
+        <div class="info">
+          <p><strong>Firebase Authentication Users:</strong></p>
+          <p>To view users in Firebase Auth, go to:</p>
+          <ol>
+            <li>Firebase Console: <a href="https://console.firebase.google.com" target="_blank" style="color: #60a5fa;">https://console.firebase.google.com</a></li>
+            <li>Select your project</li>
+            <li>Click "Authentication" → "Users" tab</li>
+          </ol>
+          <p>You'll see all registered email/password users there.</p>
+        </div>
+      `;
+    };
+
+    window.deleteUser = async function(userId, email) {
+      if (!confirm(`Are you sure you want to delete user: ${email}?`)) {
+        return;
+      }
+
+      try {
+        await deleteDoc(doc(db, 'users', userId));
+        alert(`User ${email} deleted from Firestore!`);
+        console.log(`Deleted user: ${userId}`);
+        
+        // Note: To delete from Firebase Auth, you need admin SDK (backend)
+        alert('⚠️ User deleted from Firestore. To delete from Firebase Auth, go to Firebase Console → Authentication → Users and delete manually.');
+        
+        loadUsers(); // Refresh
+      } catch (error) {
+        alert(`Error deleting user: ${error.message}`);
+        console.error(error);
+      }
+    };
+
+    window.deleteOTP = async function(otpId) {
+      try {
+        await deleteDoc(doc(db, 'otpCodes', otpId));
+        alert('OTP code deleted!');
+        loadUsers(); // Refresh
+      } catch (error) {
+        alert(`Error deleting OTP: ${error.message}`);
+        console.error(error);
+      }
+    };
+
+    // Load on page load
+    window.addEventListener('load', loadUsers);
+  </script>
+</body>
+</html>
