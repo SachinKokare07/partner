@@ -1,8 +1,6 @@
-# React + Vite
+# Partner Progress Tracking App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-<!-- Trigger deployment -->
+React + Vite app for partner collaboration and progress tracking.
 
 Currently, two official plugins are available:
 
