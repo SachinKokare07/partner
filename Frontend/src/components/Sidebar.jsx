@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, FileText, MessageCircle, UserPlus, BookOpen, User, Trash2, Wrench } from 'lucide-react';
+import { Home, FileText, MessageCircle, UserPlus, BookOpen, User } from 'lucide-react';
 
 const Sidebar = ({ currentPage, setCurrentPage, isOpen, closeSidebar }) => {
   const menuItems = [
@@ -8,9 +8,7 @@ const Sidebar = ({ currentPage, setCurrentPage, isOpen, closeSidebar }) => {
     { icon: MessageCircle, label: 'Chat', page: 'chat' },
     { icon: FileText, label: 'Notes', page: 'notes' },
     { icon: UserPlus, label: 'Partner', page: 'partner' },
-    { icon: User, label: 'About', page: 'about' },
-    { icon: Trash2, label: 'Cleanup Duplicates', page: 'cleanup' },
-    { icon: Wrench, label: 'Fix Accounts', page: 'fix-accounts' }
+    { icon: User, label: 'About', page: 'about' }
   ];
 
   return (

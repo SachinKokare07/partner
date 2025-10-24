@@ -22,6 +22,10 @@ const Notes = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingNote, setEditingNote] = useState(null);
   const [filter, setFilter] = useState('all'); // 'all', 'my', 'partner'
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [alertMessage, setAlertMessage] = useState({ title: '', message: '', type: 'error' });
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [noteToDelete, setNoteToDelete] = useState(null);
   
   const [newNote, setNewNote] = useState({
     title: '',
@@ -103,7 +107,12 @@ const Notes = () => {
   const handleCreateNote = async (e) => {
     e.preventDefault();
     if (!newNote.title.trim() || !newNote.content.trim()) {
-      alert('Please enter both title and content');
+      setAlertMessage({ 
+        title: 'Missing Information', 
+        message: 'Please enter both title and content', 
+        type: 'error' 
+      });
+      setShowAlertModal(true);
       return;
     }
 
@@ -129,7 +138,12 @@ const Notes = () => {
       fetchNotes();
     } catch (error) {
       console.error('Error creating note:', error);
-      alert('Failed to create note: ' + error.message);
+      setAlertMessage({ 
+        title: 'Error', 
+        message: `Failed to create note: ${error.message}`, 
+        type: 'error' 
+      });
+      setShowAlertModal(true);
     }
   };
 
@@ -146,19 +160,38 @@ const Notes = () => {
       fetchNotes();
     } catch (error) {
       console.error('Error updating note:', error);
-      alert('Failed to update note');
+      setAlertMessage({ 
+        title: 'Error', 
+        message: 'Failed to update note', 
+        type: 'error' 
+      });
+      setShowAlertModal(true);
     }
   };
 
-  const handleDeleteNote = async (noteId) => {
-    if (!confirm('Are you sure you want to delete this note?')) return;
+  const handleDeleteNote = (noteId) => {
+    setNoteToDelete(noteId);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!noteToDelete) return;
 
     try {
-      await deleteDoc(doc(db, 'notes', noteId));
+      await deleteDoc(doc(db, 'notes', noteToDelete));
       fetchNotes();
+      setShowDeleteModal(false);
+      setNoteToDelete(null);
     } catch (error) {
       console.error('Error deleting note:', error);
-      alert('Failed to delete note');
+      setAlertMessage({ 
+        title: 'Error', 
+        message: 'Failed to delete note', 
+        type: 'error' 
+      });
+      setShowAlertModal(true);
+      setShowDeleteModal(false);
+      setNoteToDelete(null);
     }
   };
 
@@ -400,6 +433,50 @@ const Notes = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Alert Modal */}
+      {showAlertModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowAlertModal(false)}>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className={`text-xl font-bold mb-3 ${alertMessage.type === 'error' ? 'text-red-400' : 'text-green-400'}`}>
+              {alertMessage.title}
+            </h3>
+            <p className="text-gray-300 mb-6">{alertMessage.message}</p>
+            <button
+              onClick={() => setShowAlertModal(false)}
+              className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowDeleteModal(false)}>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-white mb-3">Delete Note?</h3>
+            <p className="text-gray-400 mb-6">
+              Are you sure you want to delete this note? This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

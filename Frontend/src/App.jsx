@@ -10,8 +10,6 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import PartnerRequest from './pages/PartnerRequest';
 import About from './pages/About';
-import CleanupDuplicates from './pages/CleanupDuplicates';
-import FixAccounts from './pages/FixAccounts';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppContent() {
@@ -63,10 +61,6 @@ function AppContent() {
         return <PartnerRequest />;
       case 'about':
         return <About />;
-      case 'cleanup':
-        return <CleanupDuplicates />;
-      case 'fix-accounts':
-        return <FixAccounts />;
       default:
         return <Dashboard />;
     }

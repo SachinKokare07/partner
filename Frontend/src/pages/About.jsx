@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import ProfilePic from '../assets/Logo.png';
 import { Edit2, Save, X } from 'lucide-react';
@@ -65,13 +65,13 @@ const About = () => {
 
     try {
       const userRef = doc(db, 'users', user.id);
-      await updateDoc(userRef, {
+      await setDoc(userRef, {
         name: formData.name,
         course: formData.course,
         college: formData.college,
         year: formData.year,
         mobile: formData.mobile,
-      });
+      }, { merge: true });
 
       // Update local user state
       const updatedUser = { ...user, ...formData };

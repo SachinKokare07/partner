@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Loader, Trash2 } from 'lucide-react';
+import { Send, Loader, Trash2, ChevronDown, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase/config';
 import {
@@ -13,17 +13,113 @@ import {
   or,
   and,
   deleteDoc,
-  doc
+  doc,
+  getDocs,
+  getDoc
 } from 'firebase/firestore';
 
 const Chat = () => {
-  const { user, partner } = useAuth();
+  const { user, getPartner } = useAuth();
+  const defaultPartner = getPartner();
+  const [selectedPartner, setSelectedPartner] = useState(null);
+  const [allPartners, setAllPartners] = useState([]);
+  const [showPartnerDropdown, setShowPartnerDropdown] = useState(false);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [messageType, setMessageType] = useState('message');
   const [loading, setLoading] = useState(true);
+  const [loadingPartners, setLoadingPartners] = useState(true);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [messageToDelete, setMessageToDelete] = useState(null);
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [alertMessage, setAlertMessage] = useState('');
   const messagesEndRef = useRef(null);
   const listenerRef = useRef(null); // Track listener to avoid duplicates
+  const dropdownRef = useRef(null);
+
+  // Load all partners/friends who have messages with the user
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchAllPartners = async () => {
+      try {
+        setLoadingPartners(true);
+        const messagesRef = collection(db, 'messages');
+        
+        // Get all messages where user is sender or receiver
+        const sentQuery = query(messagesRef, where('senderId', '==', user.id));
+        const receivedQuery = query(messagesRef, where('receiverId', '==', user.id));
+        
+        const [sentSnapshot, receivedSnapshot] = await Promise.all([
+          getDocs(sentQuery),
+          getDocs(receivedQuery)
+        ]);
+
+        // Collect unique partner IDs
+        const partnerIds = new Set();
+        
+        sentSnapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (data.receiverId !== user.id) {
+            partnerIds.add(data.receiverId);
+          }
+        });
+        
+        receivedSnapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (data.senderId !== user.id) {
+            partnerIds.add(data.senderId);
+          }
+        });
+
+        // Add default partner if exists
+        if (defaultPartner && !partnerIds.has(defaultPartner.id)) {
+          partnerIds.add(defaultPartner.id);
+        }
+
+        // Fetch partner details
+        const partnersData = [];
+        for (const partnerId of partnerIds) {
+          try {
+            const partnerDoc = await getDoc(doc(db, 'users', partnerId));
+            if (partnerDoc.exists()) {
+              partnersData.push({
+                id: partnerDoc.id,
+                ...partnerDoc.data()
+              });
+            }
+          } catch (error) {
+            console.error('Error fetching partner:', partnerId, error);
+          }
+        }
+
+        setAllPartners(partnersData);
+        
+        // Set default selected partner
+        if (partnersData.length > 0) {
+          // Prefer the default partner from context, or first available
+          const preferred = defaultPartner && partnersData.find(p => p.id === defaultPartner.id);
+          setSelectedPartner(preferred || partnersData[0]);
+        }
+        
+        console.log('✅ Loaded partners:', partnersData.length);
+      } catch (error) {
+        console.error('Error loading partners:', error);
+      } finally {
+        setLoadingPartners(false);
+      }
+    };
+
+    fetchAllPartners();
+  }, [user, defaultPartner]);
+
+  // Debug: Log user and partner info when component mounts or updates
+  useEffect(() => {
+    console.log('💡 Chat Component State:');
+    console.log('   User:', user ? `${user.id} (${user.name})` : 'NOT LOADED');
+    console.log('   Selected Partner:', selectedPartner ? `${selectedPartner.id} (${selectedPartner.name})` : 'NOT SELECTED');
+    console.log('   All Partners:', allPartners.length);
+  }, [user, selectedPartner, allPartners]);
 
   // Auto-scroll to bottom when new messages arrive
   const scrollToBottom = () => {
@@ -34,9 +130,21 @@ const Chat = () => {
     scrollToBottom();
   }, [messages]);
 
-  // Real-time message listener
+  // Close dropdown when clicking outside
   useEffect(() => {
-    if (!user || !partner) {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowPartnerDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Real-time message listener - MOST RELIABLE VERSION (No complex queries)
+  useEffect(() => {
+    if (!user || !selectedPartner) {
       setLoading(false);
       return;
     }
@@ -49,95 +157,75 @@ const Chat = () => {
     }
 
     setLoading(true);
-    console.log('🔌 Setting up NEW message listener');
+    console.log('🔌 Setting up message listener');
     console.log('👤 User:', user.id, user.name);
-    console.log('👥 Partner:', partner.id, partner.name);
+    console.log('👥 Selected Partner:', selectedPartner.id, selectedPartner.name);
 
-    // Query messages where user is sender OR receiver
     const messagesRef = collection(db, 'messages');
     
-    // Get all messages where current user is involved (as sender or receiver)
-    const q1 = query(
-      messagesRef,
-      where('senderId', '==', user.id),
-      orderBy('createdAt', 'asc')
-    );
-    
-    const q2 = query(
-      messagesRef,
-      where('receiverId', '==', user.id),
-      orderBy('createdAt', 'asc')
-    );
+    // Listen to ALL messages collection (no complex queries that cause internal errors)
+    // We'll filter client-side for this specific conversation
+    const q = query(messagesRef, orderBy('createdAt', 'asc'));
 
     try {
-      // Listen to both queries
-      const unsubscribe1 = onSnapshot(
-        q1,
+      const unsubscribe = onSnapshot(
+        q,
         (snapshot) => {
-          updateMessagesFromSnapshot(snapshot, 'sent');
+          console.log('🔥 All messages snapshot:', snapshot.docs.length, 'total docs');
+          console.log('🔍 Looking for messages between:');
+          console.log('   Current User ID:', user.id, '(' + user.name + ')');
+          console.log('   Selected Partner ID:', selectedPartner.id, '(' + selectedPartner.name + ')');
+          
+          // Filter to only messages in this conversation
+          const conversationMessages = [];
+          
+          snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            const msg = {
+              id: doc.id,
+              ...data,
+              createdAt: data.createdAt?.toDate() || new Date()
+            };
+            
+            // Log every message for debugging
+            console.log(`  📧 Message ${doc.id}:`, {
+              from: msg.senderId + ' (' + msg.senderName + ')',
+              to: msg.receiverId + ' (' + msg.receiverName + ')',
+              text: msg.message?.substring(0, 30)
+            });
+            
+            // Check if this message is part of the conversation
+            const isSentByMe = msg.senderId === user.id && msg.receiverId === selectedPartner.id;
+            const isReceivedFromPartner = msg.senderId === selectedPartner.id && msg.receiverId === user.id;
+            
+            if (isSentByMe || isReceivedFromPartner) {
+              conversationMessages.push(msg);
+              console.log('    ✅ INCLUDED in conversation');
+            } else {
+              console.log('    ❌ EXCLUDED - not part of this conversation');
+            }
+          });
+          
+          console.log(`  💬 Total messages in conversation: ${conversationMessages.length}`);
+          setMessages(conversationMessages);
+          setLoading(false);
+          
+          setTimeout(() => scrollToBottom(), 100);
         },
         (error) => {
-          console.error('❌ Sent messages listener error:', error);
-        }
-      );
-      
-      const unsubscribe2 = onSnapshot(
-        q2,
-        (snapshot) => {
-          updateMessagesFromSnapshot(snapshot, 'received');
-        },
-        (error) => {
-          console.error('❌ Received messages listener error:', error);
+          console.error('❌ Message listener error:', error);
+          console.error('Error code:', error.code);
+          console.error('Error message:', error.message);
+          setLoading(false);
         }
       );
 
-      // Store both unsubscribes
-      listenerRef.current = () => {
-        unsubscribe1();
-        unsubscribe2();
-      };
+      listenerRef.current = unsubscribe;
+      console.log('✅ Listener set up successfully');
       
-      console.log('✅ Listeners set up successfully');
-      setLoading(false);
     } catch (error) {
       console.error('❌ Error setting up listener:', error);
       setLoading(false);
-    }
-    
-    // Helper function to update messages from snapshot
-    function updateMessagesFromSnapshot(snapshot, type) {
-      console.log(`🔥 ${type} messages snapshot:`, snapshot.docs.length);
-      
-      const newMessages = snapshot.docs
-        .map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt?.toDate() || new Date()
-          };
-        })
-        .filter(msg => 
-          (msg.senderId === user.id && msg.receiverId === partner.id) ||
-          (msg.senderId === partner.id && msg.receiverId === user.id)
-        );
-      
-      // Merge and deduplicate messages
-      setMessages(prev => {
-        const messageMap = new Map();
-        
-        // Add existing messages
-        prev.forEach(msg => messageMap.set(msg.id, msg));
-        
-        // Add/update new messages
-        newMessages.forEach(msg => messageMap.set(msg.id, msg));
-        
-        // Convert back to array and sort
-        return Array.from(messageMap.values())
-          .sort((a, b) => a.createdAt - b.createdAt);
-      });
-      
-      setTimeout(() => scrollToBottom(), 100);
     }
 
     return () => {
@@ -147,18 +235,18 @@ const Chat = () => {
         listenerRef.current = null;
       }
     };
-  }, [user?.id, partner?.id]);
+  }, [user?.id, selectedPartner?.id]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !user || !partner) return;
+    if (!newMessage.trim() || !user || !selectedPartner) return;
 
     const messageText = newMessage.trim();
     setNewMessage(''); // Clear input immediately
 
     console.log('📤 SENDING MESSAGE:', messageText);
     console.log('👤 From:', user.id, '(' + user.name + ')');
-    console.log('👥 To:', partner.id, '(' + partner.name + ')');
+    console.log('👥 To:', selectedPartner.id, '(' + selectedPartner.name + ')');
     console.log('⏰ Time:', new Date().toLocaleTimeString());
 
     // Optimistic UI - add message immediately
@@ -166,8 +254,8 @@ const Chat = () => {
       id: 'temp_' + Date.now(),
       senderId: user.id,
       senderName: user.name,
-      receiverId: partner.id,
-      receiverName: partner.name,
+      receiverId: selectedPartner.id,
+      receiverName: selectedPartner.name,
       message: messageText,
       type: messageType,
       createdAt: new Date(),
@@ -181,14 +269,18 @@ const Chat = () => {
       const messageData = {
         senderId: user.id,
         senderName: user.name,
-        receiverId: partner.id,
-        receiverName: partner.name,
+        receiverId: selectedPartner.id,
+        receiverName: selectedPartner.name,
         message: messageText,
         type: messageType,
         createdAt: serverTimestamp()
       };
 
-      console.log('📝 Message data:', messageData);
+      console.log('📝 Sending message with data:');
+      console.log('   senderId:', messageData.senderId, '(' + messageData.senderName + ')');
+      console.log('   receiverId:', messageData.receiverId, '(' + messageData.receiverName + ')');
+      console.log('   message:', messageData.message);
+      console.log('   type:', messageData.type);
       
       const docRef = await addDoc(collection(db, 'messages'), messageData);
       console.log('✅ MESSAGE SAVED TO FIRESTORE!');
@@ -213,29 +305,43 @@ const Chat = () => {
       // Remove temp message on error
       setMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
       setNewMessage(messageText);
-      alert('Failed to send message: ' + error.message);
+      setAlertMessage('Failed to send message: ' + error.message);
+      setShowAlertModal(true);
     }
   };
 
-  const handleDeleteMessage = async (messageId) => {
-    if (!confirm('Delete this message?')) return;
+  const handleDeleteMessage = (messageId) => {
+    setMessageToDelete(messageId);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!messageToDelete) return;
 
     try {
-      console.log('🗑️ Deleting message:', messageId);
+      console.log('🗑️ Deleting message:', messageToDelete);
       
       // Remove from UI immediately
-      setMessages(prev => prev.filter(msg => msg.id !== messageId));
+      setMessages(prev => prev.filter(msg => msg.id !== messageToDelete));
       
       // Delete from Firestore
-      await deleteDoc(doc(db, 'messages', messageId));
+      await deleteDoc(doc(db, 'messages', messageToDelete));
       console.log('✅ Message deleted from Firestore');
       
+      setShowDeleteModal(false);
+      setMessageToDelete(null);
     } catch (error) {
       console.error('❌ Delete message error:', error);
-      alert('Failed to delete message: ' + error.message);
       // Refresh messages to restore if delete failed
       // The onSnapshot listener will restore it
+      setShowDeleteModal(false);
+      setMessageToDelete(null);
     }
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteModal(false);
+    setMessageToDelete(null);
   };
 
   const getMessageStyle = (type) => {
@@ -298,44 +404,123 @@ const Chat = () => {
 
   const messageGroups = groupMessagesByDate(messages);
 
-  if (!partner) {
+  if (loadingPartners) {
     return (
-      <div className="space-y-6">
-        <div>
+      <div className="h-full flex flex-col">
+        <div className="mb-4">
+          <h2 className="text-2xl font-bold text-white mb-2">Daily Chat</h2>
+          <p className="text-gray-400">Loading your conversations...</p>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <Loader className="animate-spin text-indigo-400" size={48} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!selectedPartner || allPartners.length === 0) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="mb-4">
           <h2 className="text-2xl font-bold text-white mb-2">Daily Chat</h2>
           <p className="text-gray-400">Share your progress and stay connected</p>
         </div>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center">
-          <div className="w-16 h-16 rounded-full bg-gray-800 mx-auto mb-4 flex items-center justify-center">
-            <Send size={32} className="text-gray-600" />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center max-w-md">
+            <div className="w-16 h-16 rounded-full bg-gray-800 mx-auto mb-4 flex items-center justify-center">
+              <Send size={32} className="text-gray-600" />
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">No Conversations Yet</h3>
+            <p className="text-gray-400 mb-6">Connect with a partner to start chatting</p>
+            <button 
+              onClick={() => window.location.href = '/?page=partner'}
+              className="inline-block bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg transition"
+            >
+              Find Partner
+            </button>
           </div>
-          <h3 className="text-xl font-bold text-white mb-2">No Partner Connected</h3>
-          <p className="text-gray-400 mb-6">Connect with a partner to start chatting</p>
-          <button 
-            onClick={() => window.location.href = '/?page=partner'}
-            className="inline-block bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg transition"
-          >
-            Find Partner
-          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white mb-2">Daily Chat</h2>
-        <p className="text-gray-400">
-          Chatting with <span className="text-white font-semibold">{partner.name}</span>
-        </p>
+    <div className="h-full flex flex-col">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white mb-2">Daily Chat</h2>
+          <p className="text-gray-400">
+            Chatting with <span className="text-white font-semibold">{selectedPartner.name}</span>
+          </p>
+        </div>
+        
+        {/* Partner Switcher Dropdown */}
+        {allPartners.length > 1 && (
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setShowPartnerDropdown(!showPartnerDropdown)}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-900 border border-gray-800 rounded-lg hover:border-gray-700 transition-colors"
+            >
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-600 to-blue-600 flex items-center justify-center text-white text-sm font-semibold">
+                {selectedPartner.name?.[0]?.toUpperCase() || 'P'}
+              </div>
+              <div className="text-left">
+                <div className="text-white font-semibold text-sm">{selectedPartner.name}</div>
+                <div className="text-gray-400 text-xs">{selectedPartner.email}</div>
+              </div>
+              <ChevronDown size={16} className={`text-gray-400 transition-transform ${showPartnerDropdown ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Dropdown Menu */}
+            {showPartnerDropdown && (
+              <div className="absolute right-0 top-full mt-2 w-64 bg-gray-900 border border-gray-800 rounded-lg shadow-xl z-50 max-h-96 overflow-y-auto">
+                <div className="p-2">
+                  <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-2">
+                    <Users size={14} />
+                    Your Conversations ({allPartners.length})
+                  </div>
+                  {allPartners.map((partner) => (
+                    <button
+                      key={partner.id}
+                      onClick={() => {
+                        setSelectedPartner(partner);
+                        setShowPartnerDropdown(false);
+                      }}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                        selectedPartner.id === partner.id
+                          ? 'bg-indigo-600 text-white'
+                          : 'hover:bg-gray-800 text-gray-300'
+                      }`}
+                    >
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-semibold ${
+                        selectedPartner.id === partner.id
+                          ? 'bg-white/20'
+                          : 'bg-gradient-to-br from-cyan-600 to-blue-600'
+                      }`}>
+                        {partner.name?.[0]?.toUpperCase() || 'P'}
+                      </div>
+                      <div className="text-left flex-1">
+                        <div className="font-semibold text-sm">{partner.name}</div>
+                        <div className={`text-xs ${selectedPartner.id === partner.id ? 'text-indigo-200' : 'text-gray-500'}`}>
+                          {partner.email}
+                        </div>
+                      </div>
+                      {selectedPartner.id === partner.id && (
+                        <div className="w-2 h-2 rounded-full bg-white"></div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col" style={{ height: '600px' }}>
+      <div className="flex-1 max-w-5xl w-full mx-auto flex flex-col min-h-0">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col flex-1">
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
               {loading ? (
                 <div className="flex items-center justify-center h-full">
                   <Loader className="animate-spin text-indigo-400" size={32} />
@@ -364,11 +549,11 @@ const Chat = () => {
                           <div className="flex items-center gap-2 mb-1">
                             {msg.senderId !== user.id && (
                               <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-600 to-blue-600 flex items-center justify-center text-white text-xs font-semibold">
-                                {partner.name?.[0]?.toUpperCase() || 'P'}
+                                {selectedPartner.name?.[0]?.toUpperCase() || 'P'}
                               </div>
                             )}
                             <span className="text-sm text-gray-400 font-medium">
-                              {msg.senderId === user.id ? 'You' : partner.name}
+                              {msg.senderId === user.id ? 'You' : selectedPartner.name}
                             </span>
                             <span className="text-xs text-gray-500">{formatTime(msg.createdAt)}</span>
                             {msg.senderId === user.id && !msg.isPending && (
@@ -402,8 +587,8 @@ const Chat = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input */}
-            <div className="border-t border-gray-800 p-4">
+            {/* Message Input - Fixed at bottom */}
+            <div className="border-t border-gray-800 p-4 flex-shrink-0 bg-gray-900">
               <form onSubmit={handleSendMessage} className="space-y-3">
                 <div className="flex gap-2">
                   <button 
@@ -447,62 +632,49 @@ const Chat = () => {
               </form>
             </div>
           </div>
-        </div>
-
-        {/* Sidebar Stats */}
-        <div className="space-y-4">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Chat Stats</h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 bg-gray-800 rounded-lg">
-                <span className="text-gray-400">Total Messages</span>
-                <span className="text-white font-semibold">{messages.length}</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-800 rounded-lg">
-                <span className="text-gray-400">Your Messages</span>
-                <span className="text-white font-semibold">
-                  {messages.filter(m => m.senderId === user.id).length}
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-800 rounded-lg">
-                <span className="text-gray-400">Partner's Messages</span>
-                <span className="text-white font-semibold">
-                  {messages.filter(m => m.senderId === partner.id).length}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Message Types</h3>
-            <div className="space-y-3">
-              <div className="p-3 bg-green-900/20 border border-green-500/30 rounded-lg">
-                <div className="flex items-center gap-2 mb-1">
-                  <span>🎉</span>
-                  <span className="text-sm text-green-400 font-medium">Achievements</span>
-                </div>
-                <p className="text-2xl font-bold text-white">
-                  {messages.filter(m => m.type === 'achievement').length}
-                </p>
-              </div>
-              <div className="p-3 bg-blue-900/20 border border-blue-500/30 rounded-lg">
-                <div className="flex items-center gap-2 mb-1">
-                  <span>📢</span>
-                  <span className="text-sm text-blue-400 font-medium">Updates</span>
-                </div>
-                <p className="text-2xl font-bold text-white">
-                  {messages.filter(m => m.type === 'update').length}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-br from-indigo-900 to-purple-900 border border-indigo-700 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-2">💡 Tip</h3>
-            <p className="text-sm text-gray-300">Share your daily wins and challenges to keep each other motivated and accountable!</p>
-          </div>
-        </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={cancelDelete}>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-white mb-3">Delete Message?</h3>
+            <p className="text-gray-400 mb-6">
+              Are you sure you want to delete this message? This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={cancelDelete}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alert Modal */}
+      {showAlertModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowAlertModal(false)}>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-red-400 mb-3">Error</h3>
+            <p className="text-gray-300 mb-6">{alertMessage}</p>
+            <button
+              onClick={() => setShowAlertModal(false)}
+              className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

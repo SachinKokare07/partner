@@ -29,6 +29,10 @@ export default function Posts() {
   const [filter, setFilter] = useState('all'); // 'all', 'my', 'partner'
   const [commentingOn, setCommentingOn] = useState(null);
   const [commentText, setCommentText] = useState('');
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [alertMessage, setAlertMessage] = useState({ title: '', message: '', type: 'error' });
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [postToDelete, setPostToDelete] = useState(null);
   
   const [newPost, setNewPost] = useState({
     topic: '',
@@ -154,12 +158,22 @@ export default function Posts() {
   const handleCreatePost = async (e) => {
     e.preventDefault();
     if (!newPost.topic.trim()) {
-      alert('Please enter a topic');
+      setAlertMessage({ 
+        title: 'Missing Information', 
+        message: 'Please enter a topic', 
+        type: 'error' 
+      });
+      setShowAlertModal(true);
       return;
     }
 
     if (!newPost.postDate) {
-      alert('Please select a date');
+      setAlertMessage({ 
+        title: 'Missing Information', 
+        message: 'Please select a date', 
+        type: 'error' 
+      });
+      setShowAlertModal(true);
       return;
     }
 
@@ -202,9 +216,19 @@ export default function Posts() {
         });
         
         console.log(`Added ${postData.totalProblemsCount} problems to DSA score. New total: ${newDsaScore}`);
-        alert(`✅ Post created! Added ${postData.totalProblemsCount} problems to your DSA score. New total: ${newDsaScore}`);
+        setAlertMessage({ 
+          title: 'Success!', 
+          message: `Post created! Added ${postData.totalProblemsCount} problems to your DSA score. New total: ${newDsaScore}`, 
+          type: 'success' 
+        });
+        setShowAlertModal(true);
       } else {
-        alert('✅ Post created successfully!');
+        setAlertMessage({ 
+          title: 'Success!', 
+          message: 'Post created successfully!', 
+          type: 'success' 
+        });
+        setShowAlertModal(true);
       }
       
       // Update post streak
@@ -231,7 +255,12 @@ export default function Posts() {
     } catch (error) {
       console.error('Error creating post:', error);
       console.error('Error details:', error.message);
-      alert('Failed to create post: ' + error.message);
+      setAlertMessage({ 
+        title: 'Error', 
+        message: `Failed to create post: ${error.message}`, 
+        type: 'error' 
+      });
+      setShowAlertModal(true);
     }
   };
 
@@ -345,15 +374,29 @@ export default function Posts() {
     }
   };
 
-  const handleDeletePost = async (postId) => {
-    if (!confirm('Are you sure you want to delete this post?')) return;
+  const handleDeletePost = (postId) => {
+    setPostToDelete(postId);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeletePost = async () => {
+    if (!postToDelete) return;
 
     try {
-      await deleteDoc(doc(db, 'posts', postId));
+      await deleteDoc(doc(db, 'posts', postToDelete));
       fetchPosts();
+      setShowDeleteModal(false);
+      setPostToDelete(null);
     } catch (error) {
       console.error('Error deleting post:', error);
-      alert('Failed to delete post');
+      setAlertMessage({ 
+        title: 'Error', 
+        message: 'Failed to delete post', 
+        type: 'error' 
+      });
+      setShowAlertModal(true);
+      setShowDeleteModal(false);
+      setPostToDelete(null);
     }
   };
 
@@ -755,6 +798,50 @@ export default function Posts() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Alert Modal */}
+      {showAlertModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowAlertModal(false)}>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className={`text-xl font-bold mb-3 ${alertMessage.type === 'error' ? 'text-red-400' : 'text-green-400'}`}>
+              {alertMessage.title}
+            </h3>
+            <p className="text-gray-300 mb-6 whitespace-pre-line">{alertMessage.message}</p>
+            <button
+              onClick={() => setShowAlertModal(false)}
+              className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowDeleteModal(false)}>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-white mb-3">Delete Post?</h3>
+            <p className="text-gray-400 mb-6">
+              Are you sure you want to delete this post? This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeletePost}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

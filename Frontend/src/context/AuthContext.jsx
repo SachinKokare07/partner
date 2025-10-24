@@ -704,12 +704,6 @@ export const AuthProvider = ({ children }) => {
         return { success: false, message: "Cannot send request to yourself" };
       }
 
-      // Check if already partners
-      if (user.partner === targetDoc.id || targetData.partner === user.id) {
-        console.error('Already partners');
-        return { success: false, message: "Already partners" };
-      }
-
       // Check if request already sent
       if (targetData.pendingRequests?.includes(user.id)) {
         console.error('Request already sent');
