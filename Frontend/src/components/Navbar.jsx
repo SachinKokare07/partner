@@ -1,7 +1,7 @@
 import React from 'react';
 import { Menu, Award } from 'lucide-react';
 import Logo from '../assets/Logo.png';
-
+//navbar : 
 const Navbar = ({ toggleSidebar, showMenu = true, showUser = true }) => {
   return (
     <nav className="bg-gray-900 border-b border-gray-800 px-4 py-3 fixed w-full top-0 z-50">
